@@ -16,7 +16,7 @@ using glm::mat3;
 using glm::vec3;
 
 // --------------------------------------------------------
-// GLOBAL VARIABLES
+// GLOBAL VARIABLES FROM LAB2
 
 const int SCREEN_WIDTH = 500;
 const int SCREEN_HEIGHT = 500;
@@ -33,20 +33,18 @@ struct Intersection
   int triangleIndex;
 };
 
-float focalLength = SCREEN_HEIGHT;
-vec3 cameraPos(0, 0, -3);
+float focalLength = SCREEN_HEIGHT / 2;
+vec3 cameraPos(0, 0, -2);
 
 mat3 R = mat3(vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)); // rotation matrix for camera
 float yaw;                                                  // stored angle for camera to rotate around y axis
 float pi = 3.14159265359;
 
 vec3 lightPos(0, -0.5, -0.7);
-vec3 lightColor = 14.f * vec3(1, 1, 1);
-
-vec3 indirectLight = 0.5f * vec3(1, 1, 1);
+vec3 lightColor = 2.f * vec3(1, 1, 1);
 
 // --------------------------------------------------------
-// FUNCTION DECLARATIONS
+// FUNCTION DECLARATIONS FROM LAB2
 
 void Draw();
 void Update();
@@ -56,7 +54,12 @@ bool ClosestIntersection(
     const vector<Triangle> &triangles,
     Intersection &closestIntersection);
 void Rotate();
-vec3 DirectLight(const Intersection &i);
+// vec3 DirectLight(const Intersection &i);
+
+/*ADDED FUNCTIONS*/
+vec3 Ambient(const Intersection &i);
+vec3 Diffuse(const Intersection &i);
+vec3 Specular(const Intersection &i);
 
 // --------------------------------------------------------
 // FUNCTION DEFINITIONS
@@ -77,6 +80,7 @@ int main(int argc, char *argv[])
   return 0;
 }
 
+/*FROM LAB2, BUT WITH ADDED COMPONENTS OF PHONG REFLECTION*/
 void Draw()
 {
   // loop through all pixels and compute the corresponding ray direction.
@@ -95,10 +99,14 @@ void Draw()
       direction = R * glm::normalize(direction); // update direction of camera with rotation matrix, so that rays go from the right place
       if (ClosestIntersection(cameraPos, direction, triangles, intersection))
       {
-        vec3 light = DirectLight(intersection);
+        /*vec3 light = DirectLight(intersection);
+        vec3 colornlight = color * (light + indirectLight);*/
         vec3 color = triangles[intersection.triangleIndex].color;
-        vec3 colornlight = color * (light + indirectLight);
-        sdlAux->putPixel(x, y, colornlight);
+        vec3 ambient = Ambient(intersection);
+        vec3 diffuse = Diffuse(intersection);
+        vec3 specular = Specular(intersection);
+        vec3 illumination = color * (ambient + diffuse + specular);
+        sdlAux->putPixel(x, y, illumination);
       }
       else
       {
@@ -110,6 +118,7 @@ void Draw()
   sdlAux->render();
 }
 
+/*FROM LAB2*/
 bool ClosestIntersection(vec3 start,
                          vec3 dir,
                          const vector<Triangle> &triangles,
@@ -158,20 +167,13 @@ bool ClosestIntersection(vec3 start,
   return intersect;
 }
 
-/*void Update()
-{
-  // Compute frame time:
-  int t2 = SDL_GetTicks();
-  float dt = float(t2 - t);
-  t = t2;
-  // cout << "Render time: " << dt << " ms." << endl;
-}*/
-
+/*FROM LAB2*/
 void Rotate()
 {
   R = mat3(cos(yaw), 0, sin(yaw), 0, 1, 0, -sin(yaw), 0, cos(yaw));
 }
 
+/*FROM LAB2*/
 void Update()
 {
   // Compute frame time:
@@ -249,36 +251,75 @@ void Update()
   }
 }
 
-vec3 DirectLight(const Intersection &i)
+/* IMPLEMENTATION */
+
+/*THE AMBIENT COMPONENT*/
+vec3 Ambient(const Intersection &i)
 {
-  // Let n̂ be a unit vector describing the normal pointing out from the surface
-  // and let r̂ be a unit vector describing the direction from the surface point to the light source.
-  vec3 n = triangles[i.triangleIndex].normal;
-  vec3 r = lightPos - i.position;
-  vec3 rnorm = glm::normalize(r);
-  vec3 D;
+  // additive component, does not need arguments. global terms.
+  // ka is between 0 and 1. i choose ambient constant for silver.
+  float ka = 0.19225f;
 
-  float r_length = glm::length(r);
+  vec3 ambient = ka * lightColor;
 
-  // surface area A = 4 * pi * r^2
+  /*CODE LINE for testing the surface color as light intensity instead of global lightColor variables */
+  // vec3 ambient = ka * triangles[i.triangleIndex].color;
 
-  // We get the fraction between D and B by the projection of r̂ on n̂, i.e. a scalar product of two unit
-  // vectors. Since we do not allow negative light we take the max of the projected value and zero. If the
-  // angle between the surface normal and direction to the light source is larger than 90 degrees it does
-  // not receive any direct illumination.
+  return ambient;
+};
+
+/*THE DIFFUSE COMPONENT*/
+vec3 Diffuse(const Intersection &i)
+{
+  // needs surface normal and light direction. take argument of Intersection (just like DirectLight, same vectors)
+  vec3 normal = triangles[i.triangleIndex].normal;
+  vec3 lightdirection = lightPos - i.position;
+
+  float cosTheta = glm::dot(glm::normalize(lightdirection), normal);
+
+  // taken directly, and adapted, from lab2 DirectLight
   Intersection intersection;
-  if (ClosestIntersection(lightPos, -rnorm, triangles, intersection))
+  if (ClosestIntersection(lightPos, -glm::normalize(lightdirection), triangles, intersection))
   {
-    // if (angle > 90)
     if (intersection.distance < glm::distance(lightPos, i.position) - 0.001f)
     {
       return vec3(0, 0, 0);
     }
   }
+  // diffuse surface constant of silver, to make some shininess
+  float kd = 0.50754f;
 
-  // P is lightColor, with power for each color component
-  // D = B max(r̂ . n̂ , 0) = (P max (r̂ . n̂ , 0))/4πr^2
-  D = vec3(lightColor * glm::max(glm::dot(rnorm, n), 0.0f)) / (4.0f * glm::pow(r_length, 2.0f) * pi);
+  /*CODE LINE for testing the surface color as light intensity instead of global lightColor variables */
+  // vec3 diffuse = kd * glm::max(cosTheta * triangles[i.triangleIndex].color, 0.0f);
 
-  return D;
+  vec3 diffuse = kd * glm::max(cosTheta * lightColor, 0.0f);
+  return diffuse;
+};
+
+/*THE SPECULAR COMPONENT*/
+vec3 Specular(const Intersection &i)
+{
+  // reflection direction R and the the direction from the surface point towards the view V. can take argument of Intersection
+  // to get those vectors to work with.
+
+  // view direction from surface to view/camera
+  vec3 viewdirection = cameraPos - i.position;
+
+  // direction from surface to light
+  vec3 lightdirection = lightPos - i.position;
+
+  vec3 normal = triangles[i.triangleIndex].normal;
+
+  // direction of perfect reflection, with respect to noraml
+  vec3 perfect = glm::reflect(-glm::normalize(lightdirection), normal);
+
+  // specular exponent
+  float n = 50;
+
+  float cosTheta = glm::pow(glm::dot(perfect, glm::normalize(viewdirection)), n);
+  // specular surface constant
+  float ks = 0.508273;
+  vec3 specular = ks * lightColor * glm::max(cosTheta, 0.0f);
+
+  return specular;
 };
